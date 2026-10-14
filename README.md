@@ -10,7 +10,7 @@ Use the example code for a demonstration of how to use it.
 For the mathematical details about the HCI and ECI please refer to the technical papers. 
 If you use the toolbox in your research then please cite the following document: 
 
-J. Ostergaard, "Higher-order Common Information". 
+J. Ostergaard, "Higher-order Common Information". Available at https://arxiv.org/abs/2406.02001.
 
 @misc{ostergaard2026higherordercommoninformation,
       title={Higher-order Common Information}, 
