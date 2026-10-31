@@ -2,7 +2,50 @@ import numpy as np
 from joblib import Parallel, delayed
 from idtxl.estimators_jidt import JidtKraskovMI
 
-import numpy as np
+from numbers import Integral
+
+
+def align_signals(X, delays=None):
+    """Align columns by integer sample delays and retain their common overlap.
+
+    ``delays[c] = d`` defines column c at output time t as ``X[t - d, c]``.
+    Positive values delay a signal; negative values advance it. The delays
+    must contain one integer per input column, in the original column order.
+    All columns share the same retained time interval, including unused columns.
+    No padding, interpolation or circular wraparound is used. A common offset
+    added to every delay has no effect. None is equivalent to all zeros.
+
+    For columns [audio, eeg_left, eeg_right], delays=[14, 0, 0] yields
+    [audio[:-14], eeg_left[14:], eeg_right[14:]]. This pairs audio with EEG
+    14 samples later (218.75 ms at 64 Hz).
+    """
+    X = np.asarray(X)
+    if X.ndim != 2:
+        raise ValueError("X must be 2D: shape (samples, variables).")
+    if delays is None:
+        return X
+
+    delays = np.asarray(delays, dtype=object)
+    if delays.ndim != 1 or len(delays) != X.shape[1]:
+        raise ValueError("delays must contain one integer per input column.")
+    if any(isinstance(d, (bool, np.bool_)) or not isinstance(d, Integral)
+           for d in delays):
+        raise ValueError("delays must be integer sample counts (not booleans).")
+    if not len(delays):
+        return X
+
+    delays = [int(d) for d in delays]
+    latest = max(delays)
+    span = latest - min(delays)
+    n_samples = X.shape[0] - span
+    if n_samples <= 0:
+        raise ValueError("delays leave no overlapping samples.")
+    if span == 0:
+        return X
+    return np.column_stack([
+        X[latest - d:latest - d + n_samples, c]
+        for c, d in enumerate(delays)
+    ])
 
 
 
@@ -17,8 +60,15 @@ def compute_R2_R3(
     max_itr=10,
     threshold=0.1,
     n_jobs=1,
+    delays=None,
 ):
-    Xn = np.asarray(Xn)
+    """Compute R2 and R3, optionally after per-column sample alignment.
+
+    See align_signals for the delays convention. Alignment is performed once,
+    before the pairwise bounds and every R3 ordering; auxiliaries inherit the
+    aligned source's time reference and are not delayed again.
+    """
+    Xn = align_signals(Xn, delays)
 
     if Xn.ndim != 2:
         raise ValueError("Xn must be 2D with shape (samples, variables).")
@@ -165,6 +215,7 @@ def R3_approx_mi_fast(
     max_itr=10,
     threshold=0.1,
     n_jobs=1,
+    delays=None,
 ):
     """
     Faster independent R3 approximation using plain MI.
@@ -184,13 +235,16 @@ def R3_approx_mi_fast(
     threshold: real number between 0 and 1. Typically 0.1. The accuracy of the relative MI appproximation.
     n_jobs : int
         Parallel workers. Use n_jobs=-1 for all cores.
+    delays : sequence of int or None
+        One delay in samples per input column. Positive d uses X[t-d].
+        See align_signals. Applied once, before constructing auxiliaries.
 
     Returns
     -------
     float
     """
 
-    X = np.asarray(X)
+    X = align_signals(X, delays)
 
     if X.ndim != 2:
         raise ValueError("X must be 2D: shape (samples, variables).")
@@ -266,8 +320,10 @@ def R4_approx_mi_fast(
     max_itr=10,
     threshold=0.1,
     eps=1e-6,
+    delays=None,
 ):
-    X = np.asarray(X)
+    """Estimate R4 after optional per-column alignment (see align_signals)."""
+    X = align_signals(X, delays)
 
     Y1 = np.ascontiguousarray(X[:, i], dtype=float)
     Y2 = np.ascontiguousarray(X[:, j], dtype=float)
@@ -353,4 +409,3 @@ def R4_approx_mi_fast(
         return np.nanmax(R4_vals), R3_best, MI_12
 
     raise ValueError("aggregation must be 'mean', 'median', or 'max'.")
-
