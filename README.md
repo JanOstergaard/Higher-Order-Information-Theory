@@ -198,3 +198,62 @@ The search also stops when `max_itr` is reached, even if the specified tolerance
 | `threshold` | 0.1 | 0.01 |
 
 Increasing the number of repetitions or iterations does not necessarily guarantee more accurate HCI estimates. The results also depend on the accuracy of the underlying mutual information estimator and the available sample size.
+
+
+## Covariance-based Gaussian vector HCI (optional estimator)
+
+The new `gaussian_vector_hci.py` module provides a **Gaussian-family,
+covariance-based approximation** to higher-order common information. It accepts
+both scalar and vector-valued sources, including sources of unequal dimensions,
+and needs only NumPy (no IDTxl, JIDT or Java). It does not replace
+`hci_v3.py`, which continues to use kNN-estimated mutual information.
+
+```python
+import numpy as np
+from gaussian_vector_hci import gaussian_vector_hci
+
+# Each source has the same N samples but can have a different vector dimension.
+rng = np.random.default_rng(42)
+x1 = rng.normal(size=(5000, 3))
+x2 = x1 + rng.normal(size=(5000, 3))
+x3 = x1[:, :2] + rng.normal(size=(5000, 2))
+
+r2, r3 = gaussian_vector_hci([x1, x2, x3])
+print(f"R2={r2:.4f} bits, Gaussian-surrogate R3={r3:.4f} bits")
+```
+
+The estimator forms the empirical joint covariance, calculates Gaussian mutual
+information from squared canonical correlations, and solves each Gaussian
+information-bottleneck stage with independent Gaussian noise in canonical
+modes. It evaluates all reference variables and orderings; for `n=3` there
+is one bottleneck stage, and for `n=2` the returned `Rn` equals `R2`.
+Outputs are **total bits**, not bits per vector component. The default
+`ridge=1e-9` adds relative diagonal regularization; sufficient sample size
+and a positive definite covariance are required.
+
+**Model assumption and interpretation:** You can call this estimator on
+*arbitrary data*, including non-Gaussian data. In that case its output is
+the HCI computed from the **Gaussian surrogate with the same covariance**,
+not a distribution-free HCI estimate. The information-bottleneck solution
+is optimized within the Gaussian family, and is **not guaranteed to be
+optimal for the true non-Gaussian joint distribution**. Matching covariances
+do not imply matching mutual information or HCI. The estimate should not
+be interpreted as a rigorous bound on non-Gaussian HCI. Observations are
+treated as i.i.d. samples for covariance estimation; temporal delays,
+frequency bands or windowing should be handled before calling it.
+
+For three equicorrelated scalar Gaussians with pairwise correlation `rho`,
+the theoretical result is `R3 = -0.5*log2(1-rho**4)` bits.
+For `d` independent copies, `R3(d) = d*R3(1)`; this scaling need not
+hold for correlated vector components. A scalar Gaussian Markov chain
+with successive correlations `rho` has
+`R3 = -0.5*log2(1-rho**6)` bits.
+
+Run the dedicated tests with:
+`python -m unittest discover -s tests -p 'test_gaussian_vector_hci.py' -v`.
+
+The Gaussian method uses sample covariance and can therefore have estimation
+error even under exact Gaussianity. On non-Gaussian sources, comparisons
+against the original kNN HCI are comparisons between different statistical
+models/estimation procedures, not interchangeable estimators of a known
+common population quantity.
