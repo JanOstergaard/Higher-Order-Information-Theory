@@ -10,6 +10,7 @@ All information values are in bits. Requires NumPy; no IDTxl/JVM.
 from __future__ import annotations
 
 from itertools import permutations
+from numbers import Integral
 from typing import Sequence
 
 import numpy as np
@@ -121,8 +122,40 @@ def _gaussian_ib(cov: np.ndarray, v: slice, w: slice) -> np.ndarray:
     return 0.5 * (result + result.T)
 
 
+def delay_embed_sources(
+    sources: Sequence[np.ndarray], dimension: int, *, lag: int = 1
+) -> list[np.ndarray]:
+    """Build aligned delay-embedding vectors from scalar time series.
+
+    Each output has shape (N - (dimension-1)*lag, dimension), with row t
+    equal to [x[t], x[t+lag], ..., x[t+(dimension-1)*lag]].
+    No zero padding or wraparound is performed. The windows overlap.
+    """
+    for name, value in (("dimension", dimension), ("lag", lag)):
+        if isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral) or value < 1:
+            raise ValueError(f"{name} must be a positive integer.")
+    if len(sources) < 2:
+        raise ValueError("At least two sources are required.")
+    arrays = [np.asarray(x, dtype=float) for x in sources]
+    if any(x.ndim != 1 for x in arrays):
+        raise ValueError("Embedding requires one-dimensional scalar source inputs.")
+    if len({len(x) for x in arrays}) != 1:
+        raise ValueError("All input sources must have the same number of samples.")
+    window = (dimension - 1) * lag + 1
+    if len(arrays[0]) < window + 2:
+        raise ValueError("At least three observations must remain after embedding.")
+    if any(not np.isfinite(x).all() for x in arrays):
+        raise ValueError("All input samples must be finite.")
+    return [
+        np.lib.stride_tricks.sliding_window_view(x, window)[:, ::lag].copy()
+        for x in arrays
+    ]
+
+
 def gaussian_vector_hci(
-    sources: Sequence[np.ndarray], *, ridge: float = 1e-9
+    sources: Sequence[np.ndarray], *, ridge: float = 1e-9,
+    embedding_dim: int | None = None, embedding_lag: int = 1,
+    normalize: bool = False,
 ) -> tuple[float, float]:
     """Return (R2, Rn) using the empirical Gaussian covariance, in bits.
 
@@ -130,9 +163,34 @@ def gaussian_vector_hci(
     different dimensions. For n>=3, optimize Gaussian bottleneck stages over
     every reference index and ordering; at n=2 return R2 as Rn.
 
-    The method is valid as a covariance-based Gaussian-family calculation even
-    on non-Gaussian observations, but is not generally optimal for those laws.
+    embedding_dim: any positive integer d, or None for pre-formed vectors.
+    embedding_lag: positive integer spacing between time samples (default 1).
+    normalize: if True divide both returned quantities by common vector
+        dimension d. For unequal pre-formed source dimensions, normalization
+        is ambiguous and raises ValueError.
+
+    For embedded scalar series, there are N-(d-1)*embedding_lag rows.
+    Normalization is bits per vector component / block sample, not a
+    guaranteed information rate for dependent (overlapping) windows.
+    The Gaussian-family surrogate is not generally optimal for
+    non-Gaussian distributions.
     """
+    if embedding_dim is not None:
+        sources = delay_embed_sources(sources, embedding_dim, lag=embedding_lag)
+    elif embedding_lag != 1:
+        raise ValueError("embedding_lag requires embedding_dim.")
+    if normalize:
+        dimensions = []
+        for source in sources:
+            a = np.asarray(source)
+            if a.ndim not in (1, 2):
+                raise ValueError("Sources must be 1D or 2D arrays.")
+            dimensions.append(1 if a.ndim == 1 else a.shape[1])
+        if len(set(dimensions)) != 1:
+            raise ValueError("normalize=True requires all source dimensions equal.")
+        divisor = dimensions[0]
+    else:
+        divisor = 1
     cov, indices = _as_covariance(sources, ridge)
     n = len(indices)
     r2 = min(
@@ -140,7 +198,7 @@ def gaussian_vector_hci(
         for i in range(n) for j in range(i + 1, n)
     )
     if n == 2:
-        return r2, r2
+        return r2 / divisor, r2 / divisor
 
     reference_scores = []
     for i in range(n):
@@ -164,7 +222,7 @@ def gaussian_vector_hci(
                 )
             )
         reference_scores.append(max(ordering_scores))
-    return max(0., r2), max(0., min(r2, min(reference_scores)))
+    return max(0., r2) / divisor, max(0., min(r2, min(reference_scores))) / divisor
 
 
 compute_gaussian_vector_hci = gaussian_vector_hci
