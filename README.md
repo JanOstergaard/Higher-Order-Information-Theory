@@ -257,3 +257,50 @@ error even under exact Gaussianity. On non-Gaussian sources, comparisons
 against the original kNN HCI are comparisons between different statistical
 models/estimation procedures, not interchangeable estimators of a known
 common population quantity.
+
+
+### Delay embedding and optional normalization
+
+For **any positive integer** `d`, set `embedding_dim=d` to convert
+each scalar length-`N` time series into overlapping `d`-dimensional vectors.
+The default sample spacing is one; `embedding_lag` can change the spacing.
+
+```python
+from gaussian_vector_hci import gaussian_vector_hci, delay_embed_sources
+
+# x1, x2, x3 are scalar time series with the same length N.
+d = 20  # May be ANY positive integer, provided enough samples remain.
+
+# Direct use: construct vectors and report bits per block sample.
+r2_per_sample, r3_per_sample = gaussian_vector_hci(
+    [x1, x2, x3], embedding_dim=d, normalize=True
+)
+
+# Equivalent explicit construction:
+blocks = delay_embed_sources([x1, x2, x3], dimension=d)
+r2_total, r3_total = gaussian_vector_hci(blocks)
+assert abs(r3_per_sample - r3_total / d) < 1e-10
+```
+
+Each embedded row is `[x[t], x[t+lag], ..., x[t+(d-1)*lag]]`.
+With `lag=1`, each matrix has shape `(N-d+1, d)`; in general,
+the shape is `(N-(d-1)*lag, d)`. The procedure does **not** zero-pad,
+wrap, or concatenate across trials. For `d=1`, the input is simply
+converted to `(N,1)`; `embedding_dim=None` (default) preserves the
+existing scalar/vector input behavior. A `ValueError` is raised when
+the series is too short to provide at least three embedded observations.
+
+`normalize=False` is the **backward-compatible default**, and returns
+total information for each block. `normalize=True` divides both R2 and
+Rn by `d`, reporting **bits per block sample** (or per vector component).
+For already-vectorized inputs, normalization uses the common column count.
+If input vector dimensions are unequal, normalization is rejected rather
+than assigning an ambiguous divisor. The option does not change the
+Gaussian optimization itself.
+
+**Interpretation:** Due to overlapping windows and temporal dependencies,
+`Rn(d)/d` is a normalized block information quantity, **not necessarily
+an information rate**. Arbitrary non-Gaussian time series remain permitted,
+but results retain the Gaussian covariance-surrogate limitation described
+above. For trials, embed **each trial separately**, then analyze/aggregate
+as appropriate; do not allow windows to cross trial boundaries.

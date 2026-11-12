@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from gaussian_vector_hci import gaussian_vector_hci
+from gaussian_vector_hci import gaussian_vector_hci, delay_embed_sources
 
 
 class TestGaussianVectorHCI(unittest.TestCase):
@@ -61,6 +61,57 @@ class TestGaussianVectorHCI(unittest.TestCase):
         )
         self.assertTrue(np.isfinite([r2, rn]).all())
         self.assertGreaterEqual(rn, 0)
+
+    def test_arbitrary_embedding_dimensions(self):
+        rng = np.random.default_rng(11)
+        sources = [rng.normal(size=150) for _ in range(3)]
+        for d in (1, 2, 7, 20, 41):
+            embedded = delay_embed_sources(sources, d)
+            self.assertEqual(embedded[0].shape, (151 - d, d))
+            np.testing.assert_array_equal(embedded[1][0], sources[1][:d])
+            if d > 1:
+                np.testing.assert_array_equal(embedded[2][1], sources[2][1:d+1])
+
+    def test_embedding_matches_manual_and_normalization(self):
+        rng = np.random.default_rng(13)
+        x = rng.multivariate_normal(
+            [0, 0, 0],
+            [[1, .65, .65], [.65, 1, .65], [.65, .65, 1]],
+            size=600,
+        )
+        sources = [x[:, j] for j in range(3)]
+        for d in (1, 3, 8):
+            manual = delay_embed_sources(sources, d)
+            total = gaussian_vector_hci(manual)
+            embedded = gaussian_vector_hci(sources, embedding_dim=d)
+            normalized = gaussian_vector_hci(
+                sources, embedding_dim=d, normalize=True
+            )
+            np.testing.assert_allclose(embedded, total)
+            np.testing.assert_allclose(normalized, np.array(total) / d)
+
+    def test_embedding_lag(self):
+        x = np.arange(60, dtype=float)
+        embedded = delay_embed_sources([x, x + 2], 4, lag=3)
+        self.assertEqual(embedded[0].shape, (51, 4))
+        np.testing.assert_array_equal(embedded[0][0], [0, 3, 6, 9])
+        np.testing.assert_array_equal(embedded[0][-1], [50, 53, 56, 59])
+
+    def test_embedding_validation(self):
+        x = np.arange(40, dtype=float)
+        for bad in (0, -1, 2.3, True):
+            with self.assertRaises(ValueError):
+                delay_embed_sources([x, x], bad)
+        with self.assertRaises(ValueError):
+            gaussian_vector_hci([x, x], embedding_dim=41)
+        with self.assertRaises(ValueError):
+            gaussian_vector_hci([x, x], embedding_dim=4, embedding_lag=0)
+        with self.assertRaises(ValueError):
+            gaussian_vector_hci([x[:, None], x[:, None]], embedding_dim=2)
+        with self.assertRaises(ValueError):
+            gaussian_vector_hci([x, x], embedding_lag=2)
+        with self.assertRaises(ValueError):
+            gaussian_vector_hci([x[:, None], np.column_stack([x, x])], normalize=True)
 
     def test_invalid(self):
         x = np.ones(100)
