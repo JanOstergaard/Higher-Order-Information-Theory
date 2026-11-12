@@ -1,10 +1,10 @@
 # Higher-Order-Information-Theory
 
-**Version:** 1.0.0
+**Version:** 1.0.1
 
 Python implementations of Higher Order Common Information, Excess Co-information, Co-information, and Synergy.
 
-This Python version is an AI conversion of the original Matlab implementation made by Jan Østergaard. 
+This Python version is an AI conversion (ChatGPT-6) of the original Matlab implementation made by Jan Østergaard. 
 
 It relies upon the (conditional) mutual information estimator IDXTL: https://pwollstadt.github.io/IDTxl/html/index.html
 
